@@ -1,0 +1,34 @@
+#Create a script in your home directory:
+nano ~/update-on-login.sh
+
+#!/bin/bash
+sudo apt update && sudo apt upgrade -y
+Make it executable:
+
+#Make it executable:
+chmod +x ~/update-on-login.sh
+
+#Create a systemd user service:
+mkdir -p ~/.config/systemd/user
+nano ~/.config/systemd/user/update-on-login.service
+Paste this:
+
+[Unit]
+Description=Run apt update and upgrade on user login
+
+[Service]
+ExecStart=/home/Proxmox/update-on-login.sh
+Type=oneshot
+
+[Install]
+WantedBy=default.target
+#Replace YOUR_USERNAME with your actual username.
+
+#Enable the systemd user service:
+systemctl --user daemon-reexec
+systemctl --user daemon-reload
+systemctl --user enable update-on-login.service
+
+#Make sure user services run at login:
+If using a GUI, it's enabled by default. If not, enable lingering:
+sudo loginctl enable-linger yourusername
