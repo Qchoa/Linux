@@ -1,0 +1,22 @@
+Switch to the correct audio profile
+
+Linux uses two main Bluetooth audio profiles:
+
+A2DP – High-quality stereo audio (music), no microphone.
+HSP/HFP – Lower quality, but supports mic.
+
+Discord usually wants the HSP/HFP profile if you want to use the AirPods mic. But AirPods Max’s HSP/HFP support on Linux is often unstable because Linux’s PulseAudio and BlueZ setup doesn’t fully handle Apple’s codec.
+
+Check profiles using:
+
+pactl list cards
+
+Look for something like bluez_card.xx_xx_xx_xx_xx_xx and see which profiles are available.
+
+Switch profiles with:
+
+pavucontrol
+Go to the Configuration tab.
+Set your AirPods Max to either High Fidelity Playback (A2DP) for audio only or Headset Head Unit (HSP/HFP) for mic + audio.
+
+⚠️ Note: HSP/HFP might be low quality or not work at all. A2DP is much more reliable.
