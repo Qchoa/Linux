@@ -1,0 +1,184 @@
+# Fixing a Missing Second Monitor on Ubuntu/KDE with Hybrid NVIDIA + AMD Graphics
+
+TL;DR: If `xrandr` only shows your laptop's internal display and the external port is dead, and you have hybrid NVIDIA/AMD graphics, the cause is very likely Secure Boot blocking the unsigned NVIDIA DKMS kernel module — even after a clean driver install. The fix is enrolling a MOK (Machine Owner Key) so the kernel trusts the module.
+
+This guide walks through general dual-monitor troubleshooting first, then the specific Secure Boot/DKMS fix that solved this case.
+
+---
+
+## My Setup
+
+- Ubuntu (KDE Plasma), kernel `6.17.0-35-generic`
+- Hybrid graphics laptop:
+- AMD Renoir iGPU (Radeon RX Vega 6, Ryzen 4000/5000 Mobile series)
+- NVIDIA GeForce GTX 1650 Mobile / Max-Q (TU117M)
+- External monitor port wired to the NVIDIA dGPU
+- Secure Boot enabled in firmware
+
+---
+
+## Step 1 — Confirm the Display Isn't Detected at All
+
+bash
+xrandr --query
+
+
+If you only see your internal panel (e.g. `eDP connected primary `) and nothing else listed as connected or disconnected, the system isn't seeing the external output at the driver level — this is not a simple resolution/configuration problem.
+
+Other quick checks:
+
+bash
+xrandr --auto                      # force re-detection
+grep -i connected /sys/class/drm//status   # check kernel-level DRM connector status
+
+
+In KDE specifically, also check System Settings → Display and Monitor to rule out the monitor being detected but just disabled.
+
+---
+
+## Step 2 — Identify Your GPU Setup
+
+bash
+lspci | grep -i vga
+lspci | grep -i display
+
+
+If you see two GPUs listed (an integrated one + a discrete NVIDIA/AMD one), you're on a hybrid graphics laptop. This matters a lot: many laptops wire the HDMI/DisplayPort output directly to the discrete GPU, not the integrated one. If the discrete GPU's driver isn't loaded, that port is effectively dead, even though your internal screen works fine on the iGPU.
+
+---
+
+## Step 3 — Check if the NVIDIA Driver Is Actually Running
+
+bash
+nvidia-smi
+
+If this returns nothing, NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.
+
+
+the driver is not loaded, regardless of what's installed. This was the key symptom in my case.
+
+Also check:
+
+bash
+lsmod | grep nvidia          # should list nvidia, nvidia_drm, nvidia_modeset, etc.
+ubuntu-drivers devices       # shows detected GPU + recommended/available driver versions
+prime-select query           # shows current GPU mode (nvidia / intel / amd / on-demand)
+
+
+---
+
+## Step 4 — Install/Reinstall the Recommended Driver
+
+Sometimes the installed driver version is mismatched, broken, or just never built correctly for your current kernel. `ubuntu-drivers devices` will tell you the recommended version — use that rather than the newest available.
+
+bash
+sudo apt install nvidia-driver-535    # use whatever version shows as "recommended"
+sudo reboot
+
+
+If you hit a package lock error like:
+
+
+Could not get lock /var/lib/dpkg/lock-frontend. It is held by process . (unattended-upgrades)
+
+
+`unattended-upgrades` is running in the background. Either wait for it to finish, or:
+
+bash
+sudo kill <PID>
+sudo dpkg --configure -a
+
+
+then retry the install.
+
+After reboot, re-check `nvidia-smi`. If it's still failing, move to Step 5.
+
+---
+
+## Step 5 — Check for Secure Boot Blocking the Driver (the actual fix in my case)
+
+This is the one that's easy to miss because it fails silently — no error message, no crash, the module just never loads.
+
+bash
+mokutil --sb-state
+
+
+If this says `SecureBoot enabled`, continue:
+
+bash
+dkms status
+
+
+If this shows your nvidia module as `installed` for your running kernel (confirm with `uname -r`), but:
+
+bash
+lsmod | grep nvidia        # empty
+sudo dmesg | grep -i nvidia   # no driver load messages at all
+
+
+then the kernel built the module successfully via DKMS, but refused to load it because it isn't signed with a key Secure Boot trusts. Third-party kernel modules (like NVIDIA's proprietary driver) aren't signed by Canonical, so under Secure Boot + kernel lockdown, they're silently rejected.
+
+### The Fix — Enroll a MOK (Machine Owner Key)
+
+bash
+sudo mokutil --import /var/lib/shim-signed/mok/MOK.der
+
+
+- You'll be asked to set a temporary enrollment password (typed twice). This is separate from your login password — you'll only use it once, at the next boot.
+- If you get `SKIP:  is already in the enrollment request`, that's fine — it means it's already queued.
+
+Verify it's staged:
+
+bash
+mokutil --list-new
+ls /sys/firmware/efi/efivars/ | grep -i Mok
+
+
+You should see a `MokNew-` entry in efivars if it's properly queued for enrollment.
+
+### Reboot and Watch Closely
+
+bash
+sudo reboot
+
+
+Immediately after firmware POST, before GRUB or the Ubuntu boot logo, a blue text-mode screen titled something like "MOK Management" or "Perform MOK management" will appear. This is shim's firmware-level utility — it's easy to miss if you're not watching, and some laptops flash through it fast.
+
+On that screen:
+
+1. Select Enroll MOK
+2. Select Continue
+3. Select Yes
+4. Enter the enrollment password you set above
+5. It reboots automatically
+
+### Confirm It Worked
+
+bash
+mokutil --list-enrolled | grep -i nvidia
+nvidia-smi
+lsmod | grep nvidia
+xrandr --query
+
+
+If `nvidia-smi` now shows your GPU and driver version, and `xrandr` lists the external monitor, you're done. Plug in (or replug) the monitor if it doesn't show immediately.
+
+---
+
+## Summary of the Root Cause
+
+| Symptom | Cause |
+|---|---|
+| Only internal display in `xrandr` | External port wired to dGPU, dGPU driver not running |
+| `nvidia-smi` fails to communicate | NVIDIA kernel module not loaded |
+| `dkms status` shows "installed" but `lsmod` is empty | Module built fine, but kernel refused to load it |
+| No errors anywhere, totally silent failure | Secure Boot + kernel lockdown blocking unsigned third-party module |
+| Fix | Enroll a MOK so the signed DKMS module is trusted by Secure Boot |
+
+Key lesson: if DKMS says a module is "installed" for your exact running kernel, but `lsmod` and `dmesg` show zero trace of it ever loading, check Secure Boot before reinstalling drivers again. Reinstalling the driver won't fix a trust/signing problem — you'll just rebuild a module that still won't be allowed to load.
+
+---
+
+## Alternative: Disabling Secure Boot
+
+If MOK enrollment isn't an option for you (or the blue screen never appears on your hardware), you can disable Secure Boot entirely in your BIOS/UEFI firmware settings. This removes the signing requirement altogether, but reduces boot-chain security. The MOK approach is preferred since it keeps Secure Boot active while trusting only the specific module you've built.
