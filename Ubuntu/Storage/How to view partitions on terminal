@@ -1,0 +1,3 @@
+lsblk -o NAME,SIZE,TYPE,TRAN,MODEL,MOUNTPOINT
+
+#Terminal,#Storage,#Hardware
