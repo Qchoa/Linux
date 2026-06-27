@@ -1,3 +1,4 @@
+Open terminal and type:
 sha256sum <File>
 
 Example: sha256sum kali-linux-2026.1-live-amd64.iso
