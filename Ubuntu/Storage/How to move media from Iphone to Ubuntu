@@ -1,0 +1,42 @@
+Here's a quick guide based on that:
+
+## Transfer iPhone Photos to Linux (Ubuntu/Kubuntu) — No iCloud
+
+**1. Install required packages**
+```bash
+sudo apt install ifuse
+sudo apt install libimobiledevice-utils
+```
+
+**2. Plug in your iPhone via USB**, then tap "Trust This Computer" on the phone if prompted.
+
+**3. Validate the USB pairing**
+```bash
+idevicepair validate
+```
+
+**4. Create a mount point**
+```bash
+mkdir ~/Phone
+```
+
+**5. Mount the phone**
+```bash
+ifuse ~/Phone/
+```
+Your photos/videos will show up under `~/Phone/DCIM/`.
+
+**6. Copy your files** (drag-and-drop in your file manager, or `cp`/`rsync` from terminal).
+
+**7. Unmount when done**
+```bash
+fusermount -u ~/Phone
+```
+
+**Why this works:** it bypasses Apple's official transfer paths (Photos app, iCloud, iTunes) and talks to the phone over the same `libimobiledevice` protocol Linux uses for iOS device access — no Apple-approved software required.
+
+A couple of things worth knowing given your Kubuntu setup:
+- If `idevicepair validate` fails, unplug/replug and re-tap "Trust" — pairing records sometimes get invalidated after driver or OS updates.
+- If `ifuse` complains about "already mounted" on a retry, run `fusermount -u ~/Phone` first even if the previous mount seemed to fail.
+
+Want me to save this as a markdown file for your notes, or is inline fine?
